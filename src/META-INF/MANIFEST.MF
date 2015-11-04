@@ -1,0 +1,4 @@
+Manifest-Version: 1.0
+Class-Path: lib/bcprov-jdk15-1.44.jar lib/commons-logging-1.1.jar lib/commons-pool-1.5.4.jar lib/gnu-crypto-2.0.1.jar lib/jradius-core-1.1.4.jar lib/jradius-dictionary-1.1.4.jar lib/jradius-extended-1.1.4.jar
+Main-Class: com.okta.ConsoleClient
+

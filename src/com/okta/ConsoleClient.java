@@ -142,6 +142,32 @@ public class ConsoleClient {
         return attrs;
     }
 
+    private static class Pair<K, V> {
+        public K k;
+        public V v;
+
+        public Pair(K k, V v) {
+            this.k = k;
+            this.v = v;
+        }
+    } 
+
+    private static Pair<String, Integer> hostAndPort(String s) {
+        int i = s.indexOf(':');
+        int port = 1812;
+        if (i <= 0) {
+            return new Pair(s, port);
+        }
+
+        String[] hp = s.split(":");
+        try {
+            port = Integer.parseInt(hp[1]);
+        } catch (NumberFormatException e) {
+        }
+
+        return new Pair(hp[0], port);
+    }
+
     public static void main(String[] args) {
         try {
             Map<Params, String> argMap = parseArgs(args);
@@ -152,8 +178,9 @@ public class ConsoleClient {
 
             AttributeFactory.loadAttributeDictionary("net.jradius.dictionary.AttributeDictionaryImpl");
 
-            InetAddress host = InetAddress.getByName(argMap.get(Params.server));
-            RadiusClient rc = new RadiusClient(host, argMap.get(Params.secret), 1812, 1813, 10);
+            Pair<String, Integer> hp = hostAndPort(argMap.get(Params.server));
+            InetAddress host = InetAddress.getByName(hp.k);
+            RadiusClient rc = new RadiusClient(host, argMap.get(Params.secret), hp.v, 1813, 10);
 
             RadiusRequest request = new AccessRequest(rc, getBaseAttrList(argMap));
             request.addAttribute(new Attr_UserPassword(argMap.get(Params.password)));

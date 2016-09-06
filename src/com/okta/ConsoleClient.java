@@ -153,13 +153,13 @@ public class ConsoleClient {
     } 
 
     private static Pair<String, Integer> hostAndPort(String s) {
-        int i = s.indexOf(':');
+        int i = s.lastIndexOf(':');
         int port = 1812;
         if (i <= 0) {
             return new Pair(s, port);
         }
 
-        String[] hp = s.split(":");
+        String[] hp = new String[] {s.substring(0, i), s.substring(i+1)};
         try {
             port = Integer.parseInt(hp[1]);
         } catch (NumberFormatException e) {

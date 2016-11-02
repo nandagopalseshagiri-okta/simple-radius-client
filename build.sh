@@ -35,7 +35,9 @@ if [ $? -ne 0 ]; then
 	exit $?
 fi
 
+popd
+
+echo
 echo "You can now invoke the jar like this, "
 echo "java -jar jradius.jar -r <ip-of-radius-server> -s <shared-secret> -u <user-name> -p <user's password>"
-
-popd
+echo "       Look at the code for additional optional parameters."

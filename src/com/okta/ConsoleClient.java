@@ -1,33 +1,25 @@
 package com.okta;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.lang.Exception;
-import java.lang.System;
+import net.jradius.client.RadiusClient;
+import net.jradius.client.auth.RadiusAuthenticator;
+import net.jradius.dictionary.Attr_CallingStationId;
+import net.jradius.dictionary.Attr_NASPort;
+import net.jradius.dictionary.Attr_NASPortType;
+import net.jradius.dictionary.Attr_UserName;
+import net.jradius.dictionary.Attr_UserPassword;
+import net.jradius.packet.AccessRequest;
+import net.jradius.packet.RadiusRequest;
+import net.jradius.packet.RadiusResponse;
+import net.jradius.packet.attribute.AttributeFactory;
+import net.jradius.packet.attribute.AttributeList;
+import net.jradius.packet.attribute.RadiusAttribute;
+
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.HashMap;
 import java.util.Map;
 
-import net.jradius.client.RadiusClient;
-import net.jradius.client.auth.MSCHAPv2Authenticator;
-import net.jradius.client.auth.PAPAuthenticator;
-import net.jradius.dictionary.Attr_AcctInputOctets;
-import net.jradius.dictionary.Attr_AcctOutputOctets;
-import net.jradius.dictionary.Attr_AcctSessionId;
-import net.jradius.dictionary.Attr_AcctSessionTime;
-import net.jradius.dictionary.Attr_AcctStatusType;
-import net.jradius.dictionary.Attr_AcctTerminateCause;
-import net.jradius.dictionary.Attr_NASPort;
-import net.jradius.dictionary.Attr_NASPortType;
-import net.jradius.dictionary.Attr_ReplyMessage;
-import net.jradius.dictionary.Attr_UserName;
-import net.jradius.dictionary.Attr_UserPassword;
-import net.jradius.exception.RadiusException;
-import net.jradius.packet.*;
-import net.jradius.packet.attribute.AttributeFactory;
-import net.jradius.packet.attribute.AttributeList;
-import net.jradius.packet.attribute.value.StringValue;
-import net.jradius.util.RadiusRandom;
+import static java.net.InetAddress.getLocalHost;
 
 /*
 To make a jar file.
@@ -37,19 +29,33 @@ To make a jar file.
  */
 
 public class ConsoleClient {
+
     public enum Params {
         server("-r", "Server to connect to"),
         secret("-s", "Shared secret to use"),
         username("-u", "Username to use"),
         password("-p", "Password to use"),
+        answer("-a", "Use to answer question as mfa"),
+        clientIP("-cip", "Client IP address"),
+        standardCode("-sc", "Standard code to use for client IP"),
+        vendorCode("-vc", "Vendor code to use for client IP"),
+        vendorID("-vid", "Vendor ID code"),
         unknown("-k", "Unknown");
 
         private String shortName;
         private String meaning;
+        private boolean switchOnly;
 
         Params(String s, String mean) {
             shortName = s;
             meaning = mean;
+            switchOnly = false;
+        }
+
+        Params(String s, String mean, boolean switchOnly) {
+            shortName = s;
+            meaning = mean;
+            this.switchOnly = switchOnly;
         }
     }
 
@@ -79,6 +85,10 @@ public class ConsoleClient {
         for(int i = 0; i < args.length; ++i) {
             if (lastParam == Params.unknown) {
                 lastParam = getParamFromString(args[i]);
+                if (lastParam.switchOnly) {
+                    r.put(lastParam, "");
+                    lastParam = Params.unknown;
+                }
             } else {
                 r.put(lastParam, args[i]);
                 lastParam = Params.unknown;
@@ -107,39 +117,72 @@ public class ConsoleClient {
         }
     }
 
-    public static class SmsAuthenticator extends PAPAuthenticator {
-        private RadiusClient radiusClient;
-
-        public SmsAuthenticator(RadiusClient rc) {
-            radiusClient = rc;
-        }
-
-        @Override
-        public void processChallenge(RadiusPacket request, RadiusPacket challenge) throws RadiusException {
-            try {
-                System.out.println("received challenge");
-                super.processChallenge(request, challenge);
-                System.out.println(challenge.toString());
-                String passCode = (new BufferedReader(new InputStreamReader(System.in))).readLine();
-                request.overwriteAttribute(new Attr_UserPassword(passCode));
-
-                this.username = null;
-                this.password = null;
-
-                this.setupRequest(radiusClient, request);
-                this.processRequest(request);
-            } catch (Exception e) {
-                throw new RadiusException("passcode input failed", e);
-            }
-        }
-    }
 
     public static AttributeList getBaseAttrList(Map<Params, String> argMap) {
+
         AttributeList attrs = new AttributeList();
         attrs.add(new Attr_UserName(argMap.get(Params.username)));
         attrs.add(new Attr_NASPortType(Attr_NASPortType.Wireless80211));
-        attrs.add(new Attr_NASPort(new Long(1)));
+        attrs.add(new Attr_NASPort(1L));
+
+        String clientIp = argMap.get(Params.clientIP);
+        if (clientIp != null && clientIp.length() > 0) {
+            addVendorSpecificAttributes(argMap, attrs, clientIp);
+
+            addStandardAttributes(argMap, attrs, clientIp);
+        }
+
         return attrs;
+    }
+
+    private static void addStandardAttributes(Map<Params, String> argMap, AttributeList attrs, String clientIp) {
+        String standardCode = argMap.get(Params.standardCode);
+        if (standardCode != null) {
+            long code = Integer.parseInt(standardCode);
+            if (code < 1  || code > 64) {
+                throw new RuntimeException("The standard code values is outside [1..64] range.");
+            }
+
+            try {
+                RadiusAttribute attribute = AttributeFactory.newAttribute(code);
+                attribute.setValue(clientIp);
+                attrs.add(attribute);
+            } catch (Exception ignored) {
+                System.out.printf("Failed to add standard attribute. Exception: %s", ignored.toString());
+            }
+        } else {
+            attrs.add(new Attr_CallingStationId(clientIp));
+        }
+    }
+
+    private static void addVendorSpecificAttributes(Map<Params, String> argMap, AttributeList attrs, String clientIp) {
+        String vendorId = argMap.get(Params.vendorID);
+
+        if (vendorId != null && vendorId.equals(new Integer(PaloAltoVSADictionary.VENDOR_ID).toString())) {
+            attrs.add(new Attr_PaloAltoClientSourceIP(clientIp));
+            try {
+                attrs.add(new Attr_PaloClientHostname(getLocalHost().getHostName()));
+                attrs.add(new Attr_PaloAltoUserDomain(getLocalHost().getCanonicalHostName()));
+            } catch (UnknownHostException e) {
+                attrs.add(new Attr_PaloClientHostname("HOSTNAME"));
+                attrs.add(new Attr_PaloClientHostname("DOMAIN"));
+            }
+            return;
+        }
+
+        String vendorCode = argMap.get(Params.vendorCode);
+        if (vendorId != null && vendorId.length() > 0 && vendorCode != null && vendorCode.length() > 0) {
+            try {
+                long vendor = Integer.valueOf(vendorId);
+                long code = Integer.valueOf(vendorCode);
+                RadiusAttribute attr = AttributeFactory.newAttribute(vendor, code, null, -1);
+                attr.setValue(clientIp);
+                attrs.add(attr);
+            } catch (Exception e) {
+                System.out.println(e.toString());
+                System.out.println("Ignoring vendor specific attribute settings... Continue");
+            }
+        }
     }
 
     private static class Pair<K, V> {
@@ -169,6 +212,10 @@ public class ConsoleClient {
     }
 
     public static void main(String[] args) {
+        int radiusAccountServerPort = 1813;
+        int timeOut = 10;
+        int numRetries = 5;
+
         try {
             Map<Params, String> argMap = parseArgs(args);
             if (!hasReqArgs(argMap)) {
@@ -177,17 +224,19 @@ public class ConsoleClient {
             }
 
             AttributeFactory.loadAttributeDictionary("net.jradius.dictionary.AttributeDictionaryImpl");
+            AttributeFactory.loadAttributeDictionary(new CustomAttributeDictionary());
 
             Pair<String, Integer> hp = hostAndPort(argMap.get(Params.server));
             InetAddress host = InetAddress.getByName(hp.k);
-            RadiusClient rc = new RadiusClient(host, argMap.get(Params.secret), hp.v, 1813, 10);
+            RadiusClient rc = new RadiusClient(host, argMap.get(Params.secret), hp.v, radiusAccountServerPort, timeOut);
 
             RadiusRequest request = new AccessRequest(rc, getBaseAttrList(argMap));
             request.addAttribute(new Attr_UserPassword(argMap.get(Params.password)));
 
             System.out.println("Sending:\n" + request.toString());
 
-            RadiusResponse reply = rc.authenticate((AccessRequest) request, new SmsAuthenticator(rc), 5);
+            RadiusAuthenticator authenticator = new DefaultAuthenticator(rc, argMap.get(Params.answer));
+            RadiusResponse reply = rc.authenticate((AccessRequest) request, authenticator, numRetries);
 
             System.out.println("Received:\n" + reply.toString());
         } catch (Exception e) {

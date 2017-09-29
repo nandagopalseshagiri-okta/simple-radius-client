@@ -16,10 +16,15 @@ public class DefaultAuthenticator extends PAPAuthenticator {
     private final static String SECURITY_QUESTION = "Security Question";
     private RadiusClient radiusClient;
     private String answer;
+    private boolean needPasswordProcessing = true;
 
     public DefaultAuthenticator(RadiusClient rc, String answer) {
         radiusClient = rc;
         this.answer = answer;
+    }
+
+    public void setPasswordProcessing(boolean needed) {
+        needPasswordProcessing = needed;
     }
 
     @Override
@@ -43,6 +48,13 @@ public class DefaultAuthenticator extends PAPAuthenticator {
             this.processRequest(request);
         } catch (Exception e) {
             throw new RadiusException("passcode input failed", e);
+        }
+    }
+
+    @Override
+    public void processRequest(RadiusPacket p) throws RadiusException {
+        if (needPasswordProcessing) {
+            super.processRequest(p);
         }
     }
 

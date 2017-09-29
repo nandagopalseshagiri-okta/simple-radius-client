@@ -7,6 +7,7 @@ import net.jradius.dictionary.Attr_NASPort;
 import net.jradius.dictionary.Attr_NASPortType;
 import net.jradius.dictionary.Attr_UserName;
 import net.jradius.dictionary.Attr_UserPassword;
+import net.jradius.dictionary.Attr_ServiceType;
 import net.jradius.packet.AccessRequest;
 import net.jradius.packet.RadiusRequest;
 import net.jradius.packet.RadiusResponse;
@@ -18,6 +19,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.HashMap;
 import java.util.Map;
+import java.io.PrintStream;
 
 import static java.net.InetAddress.getLocalHost;
 
@@ -40,6 +42,7 @@ public class ConsoleClient {
         standardCode("-sc", "Standard code to use for client IP"),
         vendorCode("-vc", "Vendor code to use for client IP"),
         vendorID("-vid", "Vendor ID code"),
+        noPassword("-np", "Do not send password attribute", true),
         unknown("-k", "Unknown");
 
         private String shortName;
@@ -104,7 +107,7 @@ public class ConsoleClient {
         return   params.containsKey(Params.server) && params.get(Params.server) != null
               && params.containsKey(Params.secret)
               && params.containsKey(Params.username)
-              && params.containsKey(Params.password);
+              && (params.containsKey(Params.password) || params.containsKey(Params.noPassword));
     }
 
     public static void usage() {
@@ -231,16 +234,25 @@ public class ConsoleClient {
             RadiusClient rc = new RadiusClient(host, argMap.get(Params.secret), hp.v, radiusAccountServerPort, timeOut);
 
             RadiusRequest request = new AccessRequest(rc, getBaseAttrList(argMap));
-            request.addAttribute(new Attr_UserPassword(argMap.get(Params.password)));
+
+            if (!argMap.containsKey(Params.noPassword)) {
+                request.addAttribute(new Attr_UserPassword(argMap.get(Params.password)));
+            } else {
+                int value = 12;
+                System.out.println("not sending password attribute. Sending Attr_ServiceType with value " + value);
+                request.addAttribute(new Attr_ServiceType(value));
+            }
 
             System.out.println("Sending:\n" + request.toString());
 
-            RadiusAuthenticator authenticator = new DefaultAuthenticator(rc, argMap.get(Params.answer));
+            DefaultAuthenticator authenticator = new DefaultAuthenticator(rc, argMap.get(Params.answer));
+            authenticator.setPasswordProcessing(!argMap.containsKey(Params.noPassword));
+            
             RadiusResponse reply = rc.authenticate((AccessRequest) request, authenticator, numRetries);
 
             System.out.println("Received:\n" + reply.toString());
         } catch (Exception e) {
-            System.out.println(e.toString());
+            e.printStackTrace(new PrintStream(System.out));
         }
     }
 }
